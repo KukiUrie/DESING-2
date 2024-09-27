@@ -160,7 +160,15 @@ def handle_difficulty_selection(selected_difficulty):
     display_message(f"Dificultad seleccionada: {difficulty}")
     pygame.time.delay(1000)
 
-# Diccionario para almacenar el estado del menú
+# Crear botones
+def create_button(text, x, y, width, height, color):
+    button = pygame.Rect(x, y, width, height)
+    pygame.draw.rect(screen, color, button)
+    text_surface = font.render(text, True, BLACK)
+    screen.blit(text_surface, (x + (width // 2) - (text_surface.get_width() // 2), y + (height // 2) - (text_surface.get_height() // 2)))
+    return button
+
+# Variables para el estado del menú
 menu_state = {
     'main': True,
     'level': False,
@@ -168,23 +176,15 @@ menu_state = {
     'Cancion': False
 }
 
-# Variables para botones
-start_button = None
-level_buttons = []
-difficulty_buttons = []
-song_buttons = []
-back_button = None
-
-# Lista de canciones (asumiendo que tienes tres canciones en formato .mp3)
-songs = ["cancion1.mp3", "cancion2.mp3", "cancion3.mp3"]
-
 # Crear botones según el estado del menú
 def create_buttons():
-    global start_button, level_buttons, difficulty_buttons, song_buttons, back_button
+    screen.fill(BLACK)  # Limpia la pantalla
+
     if menu_state['main']:
-        # Botón de inicio personalizado con imagen y posible animación
-        start_button = create_start_button()
-        back_button = None
+        # Botón de inicio
+        start_button = create_button("Iniciar", screen_width // 2 - 60, screen_height // 2 - 25, 120, 50, BLUE)
+        return start_button
+
     elif menu_state['level']:
         num_levels = 5  # Número de niveles
         button_width = 120
@@ -195,7 +195,8 @@ def create_buttons():
             create_button(f"Level {i+1}", spacing + i * (button_width + spacing), 250, button_width, button_height, BLUE)
             for i in range(num_levels)
         ]
-        back_button = create_button("Back", 350, 350, 100, 50, BLUE)
+        return level_buttons
+
     elif menu_state['difficulty']:
         num_difficulties = 3  # Número de dificultades
         button_width = 150
@@ -206,7 +207,8 @@ def create_buttons():
             create_button(difficulty, spacing + i * (button_width + spacing), 250, button_width, button_height, BLUE)
             for i, difficulty in enumerate(["Facil", "Medio", "Dificil"])
         ]
-        back_button = create_button("Back", 350, 350, 100, 50, BLUE)
+        return difficulty_buttons
+
     elif menu_state['Cancion']:
         num_songs = len(songs)  # Número de canciones
         button_width = 100
@@ -217,27 +219,30 @@ def create_buttons():
             create_button(f"Cancion {i+1}", spacing + i * (button_width + spacing), 250, button_width, button_height, BLUE) 
             for i in range(num_songs)
         ]
-        back_button = create_button("Back", 350, 350, 100, 50, BLUE)
+        return song_buttons
 
-# Función para actualizar el fondo animado
+    return None  # Si no hay menú activo, devolver None
+
+# Actualiza el fondo animado
 def update_background():
     ret, frame = cap.read()
     if not ret:
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         return
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = cv2.resize(frame, (screen_width, screen_height))
-    frame = pygame.surfarray.make_surface(frame)
+    frame = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
     screen.blit(frame, (0, 0))
 
 # Función principal del bucle
 def main_loop():
+    global running
     while running:
         update_background()
         create_buttons()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return
+                running = False
+                continue
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if menu_state['main']:
