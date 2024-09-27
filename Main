@@ -43,6 +43,21 @@ frame_delay = int(1000 / fps)  # Tiempo de espera entre cuadros
 # Colores
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+YELLOW = (255, 255, 0)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+
+# Mapa de GPIO a colores y nombres
+gpio_key_map = {
+    17: ("Azul", BLUE),
+    27: ("Rojo", RED),
+    22: ("Verde", GREEN),
+    5: ("Amarillo", YELLOW),
+    6: ("Cian", CYAN),
+    13: ("Magenta", MAGENTA),
+}
 
 # Configuración de fuente
 font = pygame.font.Font(None, 40)
@@ -61,14 +76,14 @@ difficulty_speed_map = {
 game_start_time = None  # Tiempo en que empieza el juego
 button_start_time = None  # Tiempo en que aparece un nuevo desafío
 
-# Función para mostrar mensaje en pantalla
-def display_message(message, extra_text=""):
-    screen.fill((0, 0, 0))
-    text = font.render(message, True, (255, 255, 255))
+# Función para mostrar mensaje en pantalla con fondo de color
+def display_message(message, color, extra_text=""):
+    screen.fill(color)  # Cambia el fondo al color del botón
+    text = font.render(message, True, WHITE)
     screen.blit(text, (screen_width // 2 - text.get_width() // 2, screen_height // 2 - text.get_height() // 2))
     
     if extra_text:
-        extra_text_surface = font.render(extra_text, True, (255, 255, 255))
+        extra_text_surface = font.render(extra_text, True, WHITE)
         screen.blit(extra_text_surface, (screen_width // 2 - extra_text_surface.get_width() // 2, screen_height // 2 + 40))
     
     pygame.display.flip()
@@ -93,7 +108,7 @@ def game_loop(song):
     pygame.mixer.music.load(song)
     pygame.mixer.music.play(-1)  # Repetir indefinidamente hasta que se detenga manualmente
     
-    display_message("Presiona Enter para comenzar.")
+    display_message("Presiona Enter para comenzar.", BLUE)
     
     # Espera hasta que el jugador presione Enter
     while True:
@@ -110,8 +125,8 @@ def game_loop(song):
     # Juego activo
     while running:
         # Selección aleatoria de botón GPIO
-        gpio_pin, color = random.choice(list(gpio_key_map.items()))
-        display_message(f"Presiona el botón {color}")
+        gpio_pin, (color_name, color) = random.choice(list(gpio_key_map.items()))
+        display_message(f"Presiona el botón {color_name}", color)
         button_start_time = time.time()  # Inicia el temporizador para este desafío
         
         # Espera la interacción del usuario
@@ -122,9 +137,10 @@ def game_loop(song):
             elapsed_time = current_time - game_start_time  # Tiempo desde el inicio del juego
             remaining_time = difficulty_speed_map[difficulty] - (current_time - button_start_time)  # Tiempo restante para el desafío
 
-            # Actualizar la pantalla con el temporizador
-            screen.fill((0, 0, 0))
+            # Actualizar la pantalla con el temporizador y fondo de color
+            screen.fill(color)
             display_timers(remaining_time, elapsed_time)
+            pygame.display.flip()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -132,26 +148,26 @@ def game_loop(song):
                     return
 
             # Verificar si se presionó alguno de los botones físicos
-            for pin, btn_color in gpio_key_map.items():
+            for pin, (btn_color_name, btn_color) in gpio_key_map.items():
                 if GPIO.input(pin) == GPIO.LOW:  # Si el botón se presiona
                     if pin == gpio_pin:
                         score += 1
                         waiting_for_input = False
                         break
                     else:
-                        display_message("Botón incorrecto. Inténtalo de nuevo.")
+                        display_message("Botón incorrecto. Inténtalo de nuevo.", color)
                         pygame.time.delay(1000)
                         waiting_for_input = False
                         break
             
             # Control del tiempo de respuesta según dificultad
             if remaining_time <= 0:
-                display_message("Tiempo agotado. Inténtalo de nuevo.")
+                display_message("Tiempo agotado. Inténtalo de nuevo.", color)
                 pygame.time.delay(1000)
                 waiting_for_input = False
 
         # Muestra la puntuación actual
-        display_message(f"Puntuación: {score}")
+        display_message(f"Puntuación: {score}", color)
         pygame.time.delay(1000)
 
     # Detener la música cuando el juego termine
