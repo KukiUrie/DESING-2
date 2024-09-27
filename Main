@@ -1,0 +1,64 @@
+# Función principal del juego de teclas
+def game_loop(song):
+    global score, running, difficulty
+    score = 0
+    
+    # Reproducir la canción seleccionada
+    pygame.mixer.music.load(song)
+    pygame.mixer.music.play(-1)  # Repetir indefinidamente hasta que se detenga manualmente
+    
+    display_message("Presiona Enter para comenzar.")
+    
+    # Espera hasta que el jugador presione la tecla Enter
+    waiting_to_start = True
+    while waiting_to_start:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                return
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:  # Si se presiona Enter
+                    waiting_to_start = False
+    
+    # Juego activo
+    while running:
+        # Selección aleatoria de botón GPIO
+        gpio_pin, color = random.choice(list(gpio_key_map.items()))
+        display_message(f"Presiona el botón {color}")
+        display_color_background(get_color_rgb(color))  # Muestra el fondo de color
+
+        # Espera la interacción del usuario
+        waiting_for_input = True
+        start_time = time.time()
+        
+        while waiting_for_input:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    return
+
+            # Verificar si se presionó alguno de los botones físicos
+            for pin, btn_color in gpio_key_map.items():
+                if GPIO.input(pin) == GPIO.LOW:  # Si el botón se presiona
+                    if pin == gpio_pin:
+                        score += 1
+                        waiting_for_input = False
+                        break
+                    else:
+                        display_message("Botón incorrecto. Inténtalo de nuevo.")
+                        pygame.time.delay(1000)
+                        waiting_for_input = False
+                        break
+
+            # Control del tiempo de respuesta según dificultad
+            if time.time() - start_time > difficulty_speed_map[difficulty]:
+                display_message("Tiempo agotado. Inténtalo de nuevo.")
+                pygame.time.delay(1000)
+                waiting_for_input = False
+
+        # Muestra la puntuación actual
+        display_message(f"Puntuación: {score}")
+        pygame.time.delay(1000)
+
+    # Detener la música cuando el juego termine
+    pygame.mixer.music.stop()
