@@ -6,13 +6,13 @@ import time
 import RPi.GPIO as GPIO  # Importa la biblioteca de GPIO
 
 # Configurar los pines GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(5, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(6, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(13, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setmode(GPIO.BCM)  # Usar la numeración BCM de los pines
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 1 en pin 17
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 2 en pin 27
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 3 en pin 22
+GPIO.setup(5, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 4 en pin 5
+GPIO.setup(6, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 5 en pin 6
+GPIO.setup(13, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Boton 6 en pin 13
 
 # Inicializar Pygame
 pygame.init()
@@ -27,67 +27,87 @@ pygame.display.set_caption("Focusboard")
 icon_image = pygame.image.load("icon1.png")
 pygame.display.set_icon(icon_image)
 
+# Cargar el video usando OpenCV
+video_path = "background.mp4"
+cap = cv2.VideoCapture(video_path)
+
+# Verificar si el video se cargó correctamente
+if not cap.isOpened():
+    print("No se pudo cargar el video.")
+    sys.exit()
+
+# Variables para controlar la reproducción del video
+fps = cap.get(cv2.CAP_PROP_FPS)
+frame_delay = int(1000 / fps)  # Tiempo de espera entre cuadros
+
 # Colores
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 YELLOW = (255, 255, 0)
-ORANGE = (255, 165, 0)
-PURPLE = (128, 0, 128)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
 
-# Mapear botones GPIO a colores
+# Mapa de GPIO a colores y nombres
 gpio_key_map = {
-    17: ("Rojo", RED),
-    27: ("Verde", GREEN),
-    22: ("Azul", BLUE),
+    17: ("Azul", BLUE),
+    27: ("Rojo", RED),
+    22: ("Verde", GREEN),
     5: ("Amarillo", YELLOW),
-    6: ("Naranja", ORANGE),
-    13: ("Morado", PURPLE)
+    6: ("Cian", CYAN),
+    13: ("Magenta", MAGENTA),
 }
 
 # Configuración de fuente
 font = pygame.font.Font(None, 40)
 
-# Variables del juego
+# Variables globales
 score = 0
 running = True
-difficulty = "Medio"
+difficulty = "Medio"  # Dificultad por defecto
 difficulty_speed_map = {
-    "Facil": 4,    # Más tiempo para presionar
+    "Facil": 4,    # Más tiempo entre desafíos
     "Medio": 3,    # Tiempo moderado
-    "Dificil": 2   # Menos tiempo para presionar
+    "Dificil": 2   # Menos tiempo entre desafíos
 }
 
-# Función para mostrar texto en pantalla
-def display_message(message, color=WHITE):
-    screen.fill((0, 0, 0))
-    text = font.render(message, True, color)
+# Temporizadores
+game_start_time = None  # Tiempo en que empieza el juego
+button_start_time = None  # Tiempo en que aparece un nuevo desafío
+
+# Función para mostrar mensaje en pantalla con fondo de color
+def display_message(message, color, extra_text=""):
+    text = font.render(message, True, WHITE)
     screen.blit(text, (screen_width // 2 - text.get_width() // 2, screen_height // 2 - text.get_height() // 2))
+    
+    if extra_text:
+        extra_text_surface = font.render(extra_text, True, WHITE)
+        screen.blit(extra_text_surface, (screen_width // 2 - extra_text_surface.get_width() // 2, screen_height // 2 + 40))
+    
     pygame.display.flip()
 
-# Función para mostrar temporizador y contador de juego
+# Función para actualizar los temporizadores y mostrarlos en pantalla
 def display_timers(remaining_time, elapsed_time):
-    screen.fill((0, 0, 0), (0, 0, screen_width, 50))  # Limpiar parte superior de la pantalla para temporizadores
-    timer_text = font.render(f"Tiempo restante: {remaining_time:.1f} s", True, WHITE)
-    elapsed_text = font.render(f"Tiempo total: {elapsed_time:.1f} s", True, WHITE)
-    
-    # Mostrar temporizador y tiempo transcurrido
-    screen.blit(timer_text, (20, 10))
-    screen.blit(elapsed_text, (screen_width - 250, 10))
-    pygame.display.update()
+    # Muestra el tiempo restante para el desafío actual
+    remaining_time_surface = font.render(f"Tiempo restante: {remaining_time:.1f}s", True, WHITE)
+    screen.blit(remaining_time_surface, (10, 10))
+
+    # Muestra el tiempo transcurrido desde el inicio del juego
+    elapsed_time_surface = font.render(f"Tiempo de juego: {elapsed_time:.1f}s", True, WHITE)
+    screen.blit(elapsed_time_surface, (10, 50))
 
 # Función principal del juego de teclas
 def game_loop(song):
-    global score, running, difficulty
+    global score, running, difficulty, game_start_time, button_start_time
     score = 0
-    game_start_time = time.time()
+    game_start_time = time.time()  # Inicia el temporizador global del juego
     
     # Reproducir la canción seleccionada
     pygame.mixer.music.load(song)
-    pygame.mixer.music.play(-1)
+    pygame.mixer.music.play(-1)  # Repetir indefinidamente hasta que se detenga manualmente
     
-    display_message("Presiona Enter para comenzar.")
+    display_message("Presiona Enter para comenzar.", BLUE)
     
     # Espera hasta que el jugador presione Enter
     while True:
@@ -103,64 +123,88 @@ def game_loop(song):
 
     # Juego activo
     while running:
+        # Selección aleatoria de botón GPIO
         gpio_pin, (color_name, color) = random.choice(list(gpio_key_map.items()))
-        display_message(f"Presiona el botón {color_name}", color)
-        button_start_time = time.time()
+        button_start_time = time.time()  # Inicia el temporizador para este desafío
+        
+        # Espera la interacción del usuario
         waiting_for_input = True
-
-        # Juego activo para cada ronda
+        
         while waiting_for_input:
+            current_time = time.time()
+            elapsed_time = current_time - game_start_time  # Tiempo desde el inicio del juego
+            remaining_time = difficulty_speed_map[difficulty] - (current_time - button_start_time)  # Tiempo restante para el desafío
+
+            # Actualizar el fondo con el video
+            update_background()
+
+            # Mostrar el mensaje del botón a presionar
+            display_message(f"Presiona el botón {color_name}", color)
+
+            # Actualizar los temporizadores
+            display_timers(remaining_time, elapsed_time)
+
+            pygame.display.flip()
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                     return
 
-            # Actualizar fondo con el color del botón
-            screen.fill(color)
-
-            # Calcular el tiempo restante y tiempo total
-            elapsed_time = time.time() - game_start_time
-            remaining_time = difficulty_speed_map[difficulty] - (time.time() - button_start_time)
-
-            # Mostrar temporizador y contador
-            display_timers(remaining_time, elapsed_time)
-
-            # Verificar si el tiempo se ha agotado
-            if remaining_time <= 0:
-                display_message("¡Tiempo agotado!", WHITE)
-                pygame.time.delay(1000)
-                waiting_for_input = False
-                break
-
-            # Verificar si se presionó un botón físico
-            for pin, (btn_color, _) in gpio_key_map.items():
-                if GPIO.input(pin) == GPIO.LOW:  # Si se presiona el botón
+            # Verificar si se presionó alguno de los botones físicos
+            for pin, (btn_color_name, btn_color) in gpio_key_map.items():
+                if GPIO.input(pin) == GPIO.LOW:  # Si el botón se presiona
                     if pin == gpio_pin:
                         score += 1
-                        display_message(f"¡Correcto! Puntuación: {score}", WHITE)
-                        pygame.time.delay(1000)
                         waiting_for_input = False
                         break
                     else:
-                        display_message("Botón incorrecto. Inténtalo de nuevo.", WHITE)
+                        display_message("Botón incorrecto. Inténtalo de nuevo.", color)
                         pygame.time.delay(1000)
                         waiting_for_input = False
                         break
+            
+            # Control del tiempo de respuesta según dificultad
+            if remaining_time <= 0:
+                display_message("Tiempo agotado. Inténtalo de nuevo.", color)
+                pygame.time.delay(1000)
+                waiting_for_input = False
 
-        pygame.display.flip()
+        # Muestra la puntuación actual
+        display_message(f"Puntuación: {score}", color)
+        pygame.time.delay(1000)
 
     # Detener la música cuando el juego termine
     pygame.mixer.music.stop()
 
-# Función para manejar las dificultades seleccionadas
-def handle_difficulty_selection(selected_difficulty):
-    global difficulty
-    difficulty = selected_difficulty
-    display_message(f"Dificultad seleccionada: {difficulty}")
-    pygame.time.delay(1000)
+# Función para actualizar el fondo animado
+def update_background():
+    ret, frame = cap.read()
+    if not ret:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        return
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = cv2.resize(frame, (screen_width, screen_height))
+    frame_surface = pygame.surfarray.make_surface(frame)
+    screen.blit(pygame.transform.rotate(frame_surface, -90), (0, 0))
+
+# Función principal del menú
+def main_menu():
+    global running
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                return
+
+        # Actualizar el fondo con el video
+        update_background()
+
+        pygame.display.flip()
 
 # Iniciar el menú principal
-game_loop("cancion1.mp3")  # Puedes cambiar el archivo de música
+main_menu()
 
 # Limpiar los pines GPIO al salir
 GPIO.cleanup()
