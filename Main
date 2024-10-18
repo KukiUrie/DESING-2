@@ -1,8 +1,11 @@
 import pygame
 import sys
+import random
 import time
 import RPi.GPIO as GPIO
 from dataclasses import dataclass
+from typing import List
+import math
 
 @dataclass
 class Song:
@@ -16,19 +19,19 @@ class Difficulty:
     name: str
     speed: float
     score_multiplier: float
-    timing_window: float
+    timing_window: float  # Ventana de tiempo para acertar las notas
 
 class RhythmGame:
     def __init__(self):
-        # Inicialización GPIO
+        # Inicialización de GPIO
         GPIO.setmode(GPIO.BCM)
-        self.buttons = [17, 27, 22, 5, 6, 13]  # Pines GPIO
+        self.buttons = [17, 27, 22, 5, 6, 13]  # Pines GPIO para los botones
         self._setup_gpio()
 
         # Inicialización de Pygame
         pygame.mixer.init()
 
-        # Canciones y dificultades
+        # Definición de canciones y dificultades
         self.songs = [
             Song("cancion1.mp3", "Melodía Suave", 120, 180),
             Song("cancion2.mp3", "Ritmo Latino", 140, 200),
@@ -52,12 +55,11 @@ class RhythmGame:
         self.running = True
 
     def _setup_gpio(self):
-        """Configura los pines GPIO."""
         for pin in self.buttons:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     def wait_for_button_press(self):
-        """Espera hasta que se presione un botón."""
+        """Espera hasta que se presione un botón y devuelve su índice."""
         while True:
             for i, pin in enumerate(self.buttons):
                 if GPIO.input(pin) == GPIO.LOW:
@@ -75,7 +77,7 @@ class RhythmGame:
         print(f"Has seleccionado: {self.current_song.name}")
 
     def select_difficulty(self):
-        """Selecciona la dificultad usando los botones."""
+        """Selecciona una dificultad usando los botones."""
         print("Selecciona la dificultad:")
         for i, diff in enumerate(self.difficulties):
             print(f"{i + 1}: {diff.name}")
@@ -85,7 +87,7 @@ class RhythmGame:
         print(f"Has seleccionado: {self.current_difficulty.name}")
 
     def play_music(self):
-        """Reproduce la música seleccionada."""
+        """Inicia la música seleccionada."""
         try:
             pygame.mixer.music.load(self.current_song.filename)
             pygame.mixer.music.play()
@@ -94,18 +96,19 @@ class RhythmGame:
             sys.exit()
 
     def gameplay_loop(self):
-        """Bucle principal del juego."""
-        bpm_interval = 60 / self.current_song.bpm
+        """Bucle principal del juego sincronizado con la música."""
+        bpm_interval = 60 / self.current_song.bpm  # Intervalo entre pulsaciones correctas
         last_press_time = time.time()
 
         print("¡Inicia el juego! Presiona los botones al ritmo correcto.")
-
-        while pygame.mixer.music.get_busy():
+        
+        while pygame.mixer.music.get_busy():  # Mientras la canción esté reproduciéndose
             for i, pin in enumerate(self.buttons):
                 if GPIO.input(pin) == GPIO.LOW:
                     current_time = time.time()
                     time_diff = current_time - last_press_time
 
+                    # Verificar si la pulsación fue en el tiempo correcto
                     if abs(time_diff - bpm_interval) < self.current_difficulty.timing_window:
                         self.perfect_hits += 1
                         self.score += 100 * self.current_difficulty.score_multiplier
@@ -117,8 +120,8 @@ class RhythmGame:
                         self.combo = 0
                         print("¡Fallo!")
 
-                    last_press_time = current_time
-                    time.sleep(0.2)
+                    last_press_time = current_time  # Actualizar tiempo de la última pulsación
+                    time.sleep(0.2)  # Debounce
 
         print("¡La canción ha terminado!")
         self.show_results()
@@ -160,7 +163,7 @@ class RhythmGame:
             self.cleanup()
 
     def cleanup(self):
-        """Limpia los recursos."""
+        """Limpia los recursos y cierra el juego."""
         GPIO.cleanup()
         pygame.mixer.quit()
         sys.exit()
