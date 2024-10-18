@@ -5,7 +5,6 @@ import time
 import RPi.GPIO as GPIO
 from dataclasses import dataclass
 from typing import List
-import math
 
 @dataclass
 class Song:
@@ -55,15 +54,19 @@ class RhythmGame:
         self.running = True
 
     def _setup_gpio(self):
+        """Configura los pines GPIO para los botones."""
         for pin in self.buttons:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        print("Pines GPIO configurados correctamente.")
 
     def wait_for_button_press(self):
         """Espera hasta que se presione un botón y devuelve su índice."""
+        print("Esperando la selección de un botón...")
         while True:
             for i, pin in enumerate(self.buttons):
                 if GPIO.input(pin) == GPIO.LOW:
                     time.sleep(0.2)  # Debounce
+                    print(f"Botón {i + 1} presionado.")
                     return i
 
     def select_song(self):
@@ -71,7 +74,7 @@ class RhythmGame:
         print("Selecciona una canción:")
         for i, song in enumerate(self.songs):
             print(f"{i + 1}: {song.name}")
-        
+
         selected_index = self.wait_for_button_press()
         self.current_song = self.songs[selected_index]
         print(f"Has seleccionado: {self.current_song.name}")
@@ -91,8 +94,9 @@ class RhythmGame:
         try:
             pygame.mixer.music.load(self.current_song.filename)
             pygame.mixer.music.play()
-        except pygame.error:
-            print(f"Error: No se pudo cargar la canción {self.current_song.filename}")
+            print(f"Reproduciendo: {self.current_song.name}")
+        except pygame.error as e:
+            print(f"Error: No se pudo cargar la canción {self.current_song.filename}: {e}")
             sys.exit()
 
     def gameplay_loop(self):
@@ -101,7 +105,7 @@ class RhythmGame:
         last_press_time = time.time()
 
         print("¡Inicia el juego! Presiona los botones al ritmo correcto.")
-        
+
         while pygame.mixer.music.get_busy():  # Mientras la canción esté reproduciéndose
             for i, pin in enumerate(self.buttons):
                 if GPIO.input(pin) == GPIO.LOW:
