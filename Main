@@ -20,17 +20,19 @@ class Difficulty:
     score_multiplier: float
     timing_window: float  # Ventana de tiempo para acertar las notas
 
+@dataclass
+class Note:
+    time: float  # Tiempo en segundos en el que debe ser presionada
+    button: int  # Índice del botón que debe ser presionado
+
 class RhythmGame:
     def __init__(self):
-        # Inicialización de GPIO
         GPIO.setmode(GPIO.BCM)
-        self.buttons = [17, 27, 22, 5, 6, 13]  # Pines GPIO para los botones
+        self.buttons = [17, 27, 22, 5, 6, 13]
         self._setup_gpio()
 
-        # Inicialización de Pygame
         pygame.mixer.init()
 
-        # Definición de canciones y dificultades
         self.songs = [
             Song("cancion1.mp3", "Melodía Suave", 120, 180),
             Song("cancion2.mp3", "Ritmo Latino", 140, 200),
@@ -43,7 +45,6 @@ class RhythmGame:
             Difficulty("Difícil", 2.0, 2.0, 0.5)
         ]
 
-        # Estado del juego
         self.current_song = None
         self.current_difficulty = None
         self.score = 0
@@ -52,25 +53,31 @@ class RhythmGame:
         self.perfect_hits = 0
         self.misses = 0
         self.running = True
+        self.notes = []
 
     def _setup_gpio(self):
-        """Configura los pines GPIO para los botones."""
         for pin in self.buttons:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         print("Pines GPIO configurados correctamente.")
 
+    def generate_notes(self):
+        """Genera las notas de la canción en función del BPM."""
+        bpm_interval = 60 / self.current_song.bpm  # Intervalo en segundos entre notas
+        total_notes = int(self.current_song.duration / bpm_interval)
+
+        self.notes = [
+            Note(time=i * bpm_interval, button=random.randint(0, len(self.buttons) - 1))
+            for i in range(total_notes)
+        ]
+
     def wait_for_button_press(self):
-        """Espera hasta que se presione un botón y devuelve su índice."""
-        print("Esperando la selección de un botón...")
         while True:
             for i, pin in enumerate(self.buttons):
                 if GPIO.input(pin) == GPIO.LOW:
                     time.sleep(0.2)  # Debounce
-                    print(f"Botón {i + 1} presionado.")
                     return i
 
     def select_song(self):
-        """Selecciona una canción usando los botones."""
         print("Selecciona una canción:")
         for i, song in enumerate(self.songs):
             print(f"{i + 1}: {song.name}")
@@ -80,7 +87,6 @@ class RhythmGame:
         print(f"Has seleccionado: {self.current_song.name}")
 
     def select_difficulty(self):
-        """Selecciona una dificultad usando los botones."""
         print("Selecciona la dificultad:")
         for i, diff in enumerate(self.difficulties):
             print(f"{i + 1}: {diff.name}")
@@ -90,7 +96,6 @@ class RhythmGame:
         print(f"Has seleccionado: {self.current_difficulty.name}")
 
     def play_music(self):
-        """Inicia la música seleccionada."""
         try:
             pygame.mixer.music.load(self.current_song.filename)
             pygame.mixer.music.play()
@@ -100,38 +105,39 @@ class RhythmGame:
             sys.exit()
 
     def gameplay_loop(self):
-        """Bucle principal del juego sincronizado con la música."""
-        bpm_interval = 60 / self.current_song.bpm  # Intervalo entre pulsaciones correctas
-        last_press_time = time.time()
+        self.generate_notes()  # Generar las notas antes de empezar
+        start_time = time.time()
 
         print("¡Inicia el juego! Presiona los botones al ritmo correcto.")
 
-        while pygame.mixer.music.get_busy():  # Mientras la canción esté reproduciéndose
-            for i, pin in enumerate(self.buttons):
-                if GPIO.input(pin) == GPIO.LOW:
-                    current_time = time.time()
-                    time_diff = current_time - last_press_time
+        note_index = 0  # Índice de la siguiente nota a verificar
 
-                    # Verificar si la pulsación fue en el tiempo correcto
-                    if abs(time_diff - bpm_interval) < self.current_difficulty.timing_window:
-                        self.perfect_hits += 1
-                        self.score += 100 * self.current_difficulty.score_multiplier
-                        self.combo += 1
-                        self.max_combo = max(self.max_combo, self.combo)
-                        print(f"¡Perfect! Combo: {self.combo}")
-                    else:
-                        self.misses += 1
-                        self.combo = 0
-                        print("¡Fallo!")
+        while pygame.mixer.music.get_busy():
+            current_time = time.time() - start_time
 
-                    last_press_time = current_time  # Actualizar tiempo de la última pulsación
-                    time.sleep(0.2)  # Debounce
+            # Verificar si la nota actual ha pasado su tiempo de activación
+            if note_index < len(self.notes) and current_time >= self.notes[note_index].time:
+                print(f"Nota disponible: Botón {self.notes[note_index].button + 1}")
+
+                button_pressed = self.wait_for_button_press()
+
+                if button_pressed == self.notes[note_index].button:
+                    self.perfect_hits += 1
+                    self.score += 100 * self.current_difficulty.score_multiplier
+                    self.combo += 1
+                    self.max_combo = max(self.max_combo, self.combo)
+                    print(f"¡Perfect! Combo: {self.combo}")
+                else:
+                    self.misses += 1
+                    self.combo = 0
+                    print("¡Fallo!")
+
+                note_index += 1  # Pasar a la siguiente nota
 
         print("¡La canción ha terminado!")
         self.show_results()
 
     def show_results(self):
-        """Muestra los resultados al final del juego."""
         print("\n--- Resultados ---")
         print(f"Puntuación final: {self.score}")
         print(f"Combo máximo: {self.max_combo}")
@@ -140,7 +146,6 @@ class RhythmGame:
         print("------------------")
 
     def run(self):
-        """Ejecuta el flujo principal del juego."""
         try:
             while self.running:
                 self.select_song()
@@ -167,7 +172,6 @@ class RhythmGame:
             self.cleanup()
 
     def cleanup(self):
-        """Limpia los recursos y cierra el juego."""
         GPIO.cleanup()
         pygame.mixer.quit()
         sys.exit()
