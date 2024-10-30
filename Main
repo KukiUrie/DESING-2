@@ -1,4 +1,162 @@
-{
-  "song_choice": "custom",  // O un índice de 0 a 4 para las predefinidas
-  "difficulty": "Medio"
-}
+import bluetooth
+import os
+import time
+import json
+import RPi.GPIO as GPIO
+from rpi_ws281x import PixelStrip, Color
+import librosa
+
+# Configuración de los LEDs WS2812B
+LED_COUNT = 7
+LED_PIN = 18
+LED_FREQ_HZ = 800000
+LED_DMA = 10
+LED_BRIGHTNESS = 255
+LED_INVERT = False
+
+strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS)
+strip.begin()
+
+# Configuración de los botones GPIO
+GPIO.setmode(GPIO.BCM)
+BUTTONS = [17, 27, 22, 5, 6, 13, 19]
+for pin in BUTTONS:
+    GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+# Estado del juego
+notes = []
+score = {"perfect": 0, "good": 0, "miss": 0}
+combo = 0
+start_time = None
+
+# Lista de canciones predefinidas
+PREDEFINED_SONGS = [
+    "cancion1.mp3",
+    "cancion2.mp3",
+    "cancion3.mp3",
+    "cancion4.mp3",
+    "cancion5.mp3"
+]
+
+def analyze_audio(filename):
+    """Detecta los beats de la canción usando librosa."""
+    y, sr = librosa.load(filename)
+    _, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+
+    global notes
+    notes = [
+        {'time': beat, 'lane': i % len(BUTTONS), 'active': False}
+        for i, beat in enumerate(beat_times)
+    ]
+
+def start_song(filename):
+    """Inicia la reproducción de la canción."""
+    global start_time
+    start_time = time.time()
+    os.system(f'omxplayer {filename} &')
+
+def update_led_sequence():
+    """Actualiza la secuencia de LEDs."""
+    for i in range(LED_COUNT):
+        strip.setPixelColor(i, Color(0, 0, 0))
+
+    current_time = time.time() - start_time
+    for note in notes:
+        if note['time'] <= current_time and not note['active']:
+            strip.setPixelColor(note['lane'], Color(0, 255, 0))
+            strip.show()
+            break
+
+def handle_input():
+    """Maneja la entrada de los botones."""
+    global combo
+    for i, pin in enumerate(BUTTONS):
+        if GPIO.input(pin) == GPIO.LOW:
+            for note in notes:
+                if note['lane'] == i and not note['active']:
+                    note['active'] = True
+                    score["perfect"] += 1
+                    combo += 1
+                    strip.setPixelColor(i, Color(255, 0, 0))
+                    strip.show()
+                    break
+            else:
+                score["miss"] += 1
+                combo = 0
+
+def save_score():
+    """Guarda el puntaje en un archivo JSON."""
+    with open("score.json", "w") as f:
+        json.dump(score, f)
+
+def handle_bluetooth_connection(client_sock):
+    """Maneja la conexión Bluetooth con el celular."""
+    data = client_sock.recv(1024).decode()
+    selection = json.loads(data)
+
+    # Verificar si se seleccionó una canción predefinida o personalizada
+    song_choice = selection.get("song_choice")
+    difficulty = selection.get("difficulty")
+
+    if song_choice == "custom":
+        # Recibir la canción personalizada
+        print("Recibiendo canción personalizada...")
+        with open("user_song.mp3", "wb") as f:
+            while True:
+                chunk = client_sock.recv(1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+        song_filename = "user_song.mp3"
+    else:
+        # Usar una canción predefinida
+        song_filename = PREDEFINED_SONGS[song_choice]
+
+    print(f"Canción seleccionada: {song_filename}, Dificultad: {difficulty}")
+
+    analyze_audio(song_filename)
+    start_song(song_filename)
+
+    # Bucle principal del juego
+    while time.time() - start_time < 180:
+        update_led_sequence()
+        handle_input()
+        time.sleep(0.05)
+
+    save_score()
+    client_sock.send(json.dumps(score).encode())
+
+def run_bluetooth_server():
+    """Inicia el servidor Bluetooth."""
+    server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+    server_sock.bind(("", bluetooth.PORT_ANY))
+    server_sock.listen(1)
+
+    port = server_sock.getsockname()[1]
+    bluetooth.advertise_service(
+        server_sock, "RhythmGameServer",
+        service_id="00001101-0000-1000-8000-00805F9B34FB",
+        service_classes=["00001101-0000-1000-8000-00805F9B34FB"],
+        profiles=[bluetooth.SERIAL_PORT_PROFILE]
+    )
+
+    print(f"Esperando conexión en el puerto {port}...")
+
+    client_sock, client_info = server_sock.accept()
+    print(f"Conexión establecida con {client_info}")
+
+    try:
+        handle_bluetooth_connection(client_sock)
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        client_sock.close()
+        server_sock.close()
+
+if __name__ == "__main__":
+    try:
+        run_bluetooth_server()
+    except KeyboardInterrupt:
+        GPIO.cleanup()
+        print("Servidor detenido")
