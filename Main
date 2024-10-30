@@ -3,9 +3,21 @@ import sys
 import random
 import time
 import RPi.GPIO as GPIO
+from rpi_ws281x import PixelStrip, Color  # Biblioteca para WS2812B
 from dataclasses import dataclass
-from typing import List, Dict, Optional
-import math
+import librosa
+
+# **Configuración del strip LED WS2812B**
+LED_COUNT = 7  # Número de LEDs (uno por botón)
+LED_PIN = 18   # GPIO donde se conectan los datos del strip
+LED_FREQ_HZ = 800000  # Frecuencia de actualización
+LED_DMA = 10  # Canal DMA
+LED_BRIGHTNESS = 255  # Brillo de los LEDs
+LED_INVERT = False  # Si se usa un transistor para invertir la señal
+
+# Inicializar el strip LED
+strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS)
+strip.begin()  # Iniciar el strip LED
 
 @dataclass
 class Song:
@@ -23,384 +35,121 @@ class Difficulty:
     timing_window: float
     note_speed: int
 
-# Constantes
 COLORS = {
     'BLACK': (0, 0, 0),
     'WHITE': (255, 255, 255),
-    'BLUE': (0, 100, 255),
-    'RED': (255, 50, 50),
     'GREEN': (50, 255, 50),
+    'RED': (255, 50, 50),
     'YELLOW': (255, 255, 50),
     'PURPLE': (150, 50, 255),
     'CYAN': (50, 255, 255)
 }
 
-class ParticleEffect:
-    def __init__(self, x, y, color):
-        self.x = x
-        self.y = y
-        self.particles = []
-        self.color = color
-        self.create_particles()
-        self.lifetime = 30  # frames
-        
-    def create_particles(self):
-        for _ in range(10):
-            angle = random.uniform(0, math.pi * 2)
-            speed = random.uniform(2, 5)
-            self.particles.append({
-                'x': self.x,
-                'y': self.y,
-                'dx': math.cos(angle) * speed,
-                'dy': math.sin(angle) * speed,
-                'lifetime': self.lifetime
-            })
-    
-    def update(self):
-        for particle in self.particles:
-            particle['x'] += particle['dx']
-            particle['y'] += particle['dy']
-            particle['lifetime'] -= 1
-    
-    def draw(self, screen):
-        for particle in self.particles:
-            if particle['lifetime'] > 0:
-                alpha = int((particle['lifetime'] / self.lifetime) * 255)
-                color = (*self.color, alpha)
-                surf = pygame.Surface((4, 4), pygame.SRCALPHA)
-                pygame.draw.circle(surf, color, (2, 2), 2)
-                screen.blit(surf, (particle['x'] - 2, particle['y'] - 2))
-
 class RhythmGame:
     def __init__(self):
-        # Inicialización de GPIO
         GPIO.setmode(GPIO.BCM)
-        self.buttons = [17, 27, 22, 5, 6, 13]
+        self.buttons = [17, 27, 22, 5, 6, 13, 19]  # 7 botones conectados a estos pines GPIO
         self._setup_gpio()
-        
-        # Inicialización de Pygame
+
         pygame.init()
         pygame.mixer.init()
         pygame.font.init()
-        
-        # Configuración de pantalla
+
         self.screen_width = 800
         self.screen_height = 600
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
         pygame.display.set_caption("Rhythm Master")
-        
-        # Fuentes
-        self.font_large = pygame.font.Font(None, 74)
-        self.font_medium = pygame.font.Font(None, 48)
-        self.font_small = pygame.font.Font(None, 36)
-        
-        # Canciones
+
         self.songs = [
-            Song("cancion1.mp3", "Melodía Suave", 120, 180, COLORS['BLUE']),
-            Song("cancion2.mp3", "Ritmo Latino", 140, 200, COLORS['PURPLE']),
+            Song("cancion1.mp3", "Melodía Suave", 120, 180, COLORS['PURPLE']),
+            Song("cancion2.mp3", "Ritmo Latino", 140, 200, COLORS['YELLOW']),
             Song("cancion3.mp3", "Rock Intenso", 160, 220, COLORS['RED'])
         ]
-        
-        # Dificultades
-        self.difficulties = [
-            Difficulty("Fácil", 4.0, 1.0, 1.0, 3),
-            Difficulty("Medio", 3.0, 1.5, 0.8, 5),
-            Difficulty("Difícil", 2.0, 2.0, 0.5, 7)
-        ]
-        
-        # Estado del juego
-        self.score = 0
-        self.combo = 0
-        self.max_combo = 0
-        self.perfect_hits = 0
-        self.good_hits = 0
-        self.misses = 0
-        self.particle_effects = []
-        self.running = True
-        
-        # Elementos del juego
+
         self.notes = []
-        self.button_lights = [{'active': False, 'timer': 0} for _ in self.buttons]
-        self.lane_width = self.screen_width / len(self.buttons)
-        
+        self.current_song = None
+        self.start_time = None
+
     def _setup_gpio(self):
+        """Configura los pines GPIO como entradas con resistencias pull-up."""
         for pin in self.buttons:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-    def draw_background(self):
-        # Crear un degradado de color
-        for i in range(self.screen_height):
-            color_value = int((i / self.screen_height) * 50)
-            color = (color_value, color_value, color_value)
-            pygame.draw.line(self.screen, color, (0, i), (self.screen_width, i))
+    def analyze_audio(self, filename):
+        """Detecta los beats y genera notas sincronizadas."""
+        y, sr = librosa.load(filename)
+        _, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
-    def draw_lane_lines(self):
-        for i in range(len(self.buttons) + 1):
-            x = i * self.lane_width
-            pygame.draw.line(self.screen, COLORS['WHITE'], (x, 0), (x, self.screen_height), 2)
-            
-        # Dibujar línea objetivo
-        target_y = self.screen_height - 100
-        pygame.draw.line(self.screen, COLORS['YELLOW'], 
-                        (0, target_y), (self.screen_width, target_y), 3)
+        # Genera una lista de notas para los botones
+        self.notes = [
+            {'time': beat, 'lane': i % len(self.buttons), 'y': 0, 'active': False}
+            for i, beat in enumerate(beat_times)
+        ]
 
-    def draw_note(self, x, y, active=False):
-        color = COLORS['GREEN'] if active else COLORS['BLUE']
-        size = 30 if active else 25
-        pygame.draw.circle(self.screen, color, (x, y), size)
-        pygame.draw.circle(self.screen, COLORS['WHITE'], (x, y), size - 3, 2)
+    def start_song(self):
+        """Inicia la canción y guarda el tiempo de inicio."""
+        pygame.mixer.music.load(self.current_song.filename)
+        pygame.mixer.music.play()
+        self.start_time = time.time()
 
-    def draw_button_indicators(self):
-        for i, light in enumerate(self.button_lights):
-            x = self.lane_width * (i + 0.5)
-            y = self.screen_height - 50
-            color = COLORS['GREEN'] if light['active'] else COLORS['WHITE']
-            pygame.draw.circle(self.screen, color, (int(x), int(y)), 20)
-            number = self.font_small.render(str(i + 1), True, COLORS['BLACK'])
-            number_rect = number.get_rect(center=(x, y))
-            self.screen.blit(number, number_rect)
+    def update_led_sequence(self):
+        """Actualiza los LEDs según la siguiente nota."""
+        for i in range(LED_COUNT):
+            strip.setPixelColor(i, Color(0, 0, 0))  # Apaga todos los LEDs
 
-    def draw_score_info(self):
-        # Puntuación
-        score_text = self.font_medium.render(f"Puntos: {self.score}", True, COLORS['WHITE'])
-        self.screen.blit(score_text, (10, 10))
-        
-        # Combo
-        if self.combo > 1:
-            combo_text = self.font_large.render(f"x{self.combo}", True, COLORS['YELLOW'])
-            combo_rect = combo_text.get_rect(center=(self.screen_width//2, 50))
-            self.screen.blit(combo_text, combo_rect)
-        
-        # Estadísticas
-        stats_text = self.font_small.render(
-            f"Perfect: {self.perfect_hits} Good: {self.good_hits} Miss: {self.misses}", 
-            True, COLORS['WHITE']
-        )
-        self.screen.blit(stats_text, (10, 50))
-
-    def draw_gameplay(self):
-        self.draw_background()
-        self.draw_lane_lines()
-        
-        # Dibujar notas
+        current_time = time.time() - self.start_time
         for note in self.notes:
-            self.draw_note(note['x'], note['y'], note['active'])
-        
-        # Dibujar efectos de partículas
-        for effect in self.particle_effects[:]:
-            effect.update()
-            effect.draw(self.screen)
-            if all(p['lifetime'] <= 0 for p in effect.particles):
-                self.particle_effects.remove(effect)
-        
-        self.draw_button_indicators()
-        self.draw_score_info()
-        pygame.display.flip()
-
-    def show_menu(self, items, title):
-        selected = 0
-        while True:
-            self.screen.fill(COLORS['BLACK'])
-            
-            # Título
-            title_text = self.font_large.render(title, True, COLORS['WHITE'])
-            title_rect = title_text.get_rect(center=(self.screen_width//2, 100))
-            self.screen.blit(title_text, title_rect)
-            
-            # Opciones
-            for i, item in enumerate(items):
-                color = COLORS['YELLOW'] if i == selected else COLORS['WHITE']
-                text = self.font_medium.render(item, True, color)
-                rect = text.get_rect(center=(self.screen_width//2, 250 + i * 60))
-                self.screen.blit(text, rect)
-            
-            pygame.display.flip()
-            
-            # Esperar entrada
-            for pin in self.buttons:
-                if GPIO.input(pin) == GPIO.LOW:
-                    if pin in [self.buttons[0], self.buttons[3]]:  # Arriba
-                        selected = (selected - 1) % len(items)
-                    elif pin in [self.buttons[2], self.buttons[5]]:  # Abajo
-                        selected = (selected + 1) % len(items)
-                    elif pin == self.buttons[1]:  # Seleccionar
-                        return selected
-                    time.sleep(0.2)  # Debounce
+            if note['time'] <= current_time and not note['active']:
+                strip.setPixelColor(note['lane'], Color(0, 255, 0))  # Enciende en verde
+                strip.show()
+                break  # Solo muestra la primera nota activa
 
     def gameplay_loop(self):
+        """Bucle principal del juego."""
         clock = pygame.time.Clock()
-        start_time = time.time()
-        note_spawn_time = start_time
-        
-        while self.running and time.time() - start_time < self.current_song.duration:
-            current_time = time.time()
-            
-            # Generar nuevas notas
-            if current_time - note_spawn_time > 60 / self.current_song.bpm:
-                lane = random.randint(0, len(self.buttons) - 1)
-                x = self.lane_width * (lane + 0.5)
-                self.notes.append({
-                    'x': x,
-                    'y': 0,
-                    'lane': lane,
-                    'active': False
-                })
-                note_spawn_time = current_time
-            
-            # Actualizar notas
-            for note in self.notes[:]:
-                note['y'] += self.current_difficulty.note_speed
-                if note['y'] > self.screen_height:
-                    self.notes.remove(note)
-                    if not note['active']:
-                        self.handle_miss()
-            
-            # Manejar entrada de botones
+        self.start_song()
+
+        while pygame.mixer.music.get_busy():
+            self.update_led_sequence()  # Actualiza los LEDs
+
+            # Actualiza las posiciones de las notas
+            for note in self.notes:
+                if note['active']:
+                    note['y'] += 5  # Desplaza la nota hacia abajo
+                    if note['y'] > self.screen_height:
+                        self.notes.remove(note)
+
             self.handle_input()
-            
-            # Actualizar luces de botones
-            for light in self.button_lights:
-                if light['timer'] > 0:
-                    light['timer'] -= 1
-                else:
-                    light['active'] = False
-            
-            self.draw_gameplay()
             clock.tick(60)
 
     def handle_input(self):
+        """Maneja la entrada de los botones GPIO."""
         for i, pin in enumerate(self.buttons):
             if GPIO.input(pin) == GPIO.LOW:
-                self.button_lights[i]['active'] = True
-                self.button_lights[i]['timer'] = 10
-                
-                # Buscar la nota más cercana en el carril
-                target_y = self.screen_height - 100
-                closest_note = None
-                min_distance = float('inf')
-                
                 for note in self.notes:
                     if note['lane'] == i and not note['active']:
-                        distance = abs(note['y'] - target_y)
-                        if distance < min_distance:
-                            min_distance = distance
-                            closest_note = note
-                
-                if closest_note and min_distance < 50:
-                    closest_note['active'] = True
-                    self.handle_hit(min_distance)
-                    x = self.lane_width * (i + 0.5)
-                    self.particle_effects.append(ParticleEffect(x, target_y, COLORS['GREEN']))
-
-    def handle_hit(self, distance):
-        if distance < 20:
-            self.perfect_hits += 1
-            points = 100
-            color = COLORS['GREEN']
-        else:
-            self.good_hits += 1
-            points = 50
-            color = COLORS['YELLOW']
-        
-        self.score += points * self.combo
-        self.combo += 1
-        self.max_combo = max(self.max_combo, self.combo)
-
-    def handle_miss(self):
-        self.misses += 1
-        self.combo = 0
-
-    def show_results(self):
-        while True:
-            self.screen.fill(COLORS['BLACK'])
-            
-            texts = [
-                ("¡Juego Terminado!", COLORS['WHITE'], 100),
-                (f"Puntuación Final: {self.score}", COLORS['YELLOW'], 200),
-                (f"Combo Máximo: {self.max_combo}", COLORS['GREEN'], 260),
-                (f"Perfect: {self.perfect_hits}", COLORS['CYAN'], 320),
-                (f"Good: {self.good_hits}", COLORS['GREEN'], 380),
-                (f"Miss: {self.misses}", COLORS['RED'], 440),
-                ("Presiona cualquier botón para continuar", COLORS['WHITE'], 500)
-            ]
-            
-            for text, color, y in texts:
-                rendered = self.font_medium.render(text, True, color)
-                rect = rendered.get_rect(center=(self.screen_width//2, y))
-                self.screen.blit(rendered, rect)
-            
-            pygame.display.flip()
-            
-            if any(GPIO.input(pin) == GPIO.LOW for pin in self.buttons):
-                time.sleep(0.2)
-                break
+                        note['active'] = True
+                        strip.setPixelColor(i, Color(255, 0, 0))  # Enciende en rojo al acertar
+                        strip.show()
+                        break
 
     def run(self):
+        """Ejecuta el juego."""
         try:
-            while self.running:
-                # Menú principal
-                song_names = [song.name for song in self.songs]
-                selected_song = self.show_menu(song_names, "Selecciona una Canción")
-                self.current_song = self.songs[selected_song]
-                
-                difficulty_names = [diff.name for diff in self.difficulties]
-                selected_diff = self.show_menu(difficulty_names, "Selecciona la Dificultad")
-                self.current_difficulty = self.difficulties[selected_diff]
-                
-                # Reiniciar estadísticas
-                self.score = 0
-                self.combo = 0
-                self.max_combo = 0
-                self.perfect_hits = 0
-                self.good_hits = 0
-                self.misses = 0
-                self.notes = []
-                
-                # Cuenta regresiva
-                for i in range(3, 0, -1):
-                    self.screen.fill(COLORS['BLACK'])
-                    count = self.font_large.render(str(i), True, COLORS['WHITE'])
-                    count_rect = count.get_rect(center=(self.screen_width//2, self.screen_height//2))
-                    self.screen.blit(count, count_rect)
-                    pygame.display.flip()
-                    time.sleep(1)
-                
-                # Iniciar música
-                try:
-                    pygame.mixer.music.load(self.current_song.filename)
-                    pygame.mixer.music.play()
-                except pygame.error:
-                    print(f"Error: No se pudo cargar la canción {self.current_song.filename}")
-                    continue
-                
-                # Bucle principal del juego
-                self.gameplay_loop()
-                
-                # Detener música
-                pygame.mixer.music.stop()
-                
-                # Mostrar resultados
-                self.show_results()
-                
-                # Preguntar si quiere jugar de nuevo
-                play_again = self.show_menu(["Jugar de nuevo", "Salir"], "¿Qué deseas hacer?")
-                if play_again == 1:
-                    self.running = False
-                
-        except KeyboardInterrupt:
-            print("\nJuego terminado por el usuario")
-        except Exception as e:
-            print(f"Error: {e}")
+            self.current_song = self.songs[0]  # Selecciona la primera canción
+            self.analyze_audio(self.current_song.filename)
+            self.gameplay_loop()
         finally:
             self.cleanup()
 
     def cleanup(self):
-        """Limpia los recursos y cierra el juego"""
+        """Limpia los recursos y apaga los LEDs."""
         GPIO.cleanup()
         pygame.quit()
+        strip.show()  # Apaga todos los LEDs
         sys.exit()
 
 if __name__ == "__main__":
-    # Crear y ejecutar el juego
     game = RhythmGame()
     game.run()
